@@ -1,4 +1,23 @@
+import sys
+import subprocess
+
+# Lista de bibliotecas necessárias para o InvestIA
+packages = ["yfinance", "pandas", "numpy", "plotly", "scikit-learn"]
+
+# Instala automaticamente no servidor da nuvem se não estiverem presentes
+for package in packages:
+    try:
+        __import__(package)
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+# Importações principais do aplicativo
+import yfinance as yf
 import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+from sklearn.ensemble import RandomForestClassifierimport streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
