@@ -1,17 +1,3 @@
-import sys
-import subprocess
-
-# Lista de dependências necessárias para o InvestIA
-packages = ["yfinance", "pandas", "numpy", "plotly", "scikit-learn"]
-
-# Auto-instalação no servidor em nuvem caso alguma biblioteca falhe
-for package in packages:
-    try:
-        __import__(package)
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-# Importações das bibliotecas principais
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -53,22 +39,26 @@ with aba1:
     
     try:
         with st.spinner("Buscando dados históricos do ativo..."):
-            dados = yf.download(ticker_input_formatted, period="2y", progress=False)
+            # multi_level_index=False evita colunas com MultiIndex
+            dados = yf.download(ticker_input_formatted, period="2y", progress=False, multi_level_index=False)
             
         if dados.empty:
             st.error(f"Não foram encontrados dados para o código '{ticker_input_formatted}'. Verifique a digitação.")
         else:
+            # Garante que estamos trabalhando com Series (não DataFrame de 1 coluna)
+            close_series = dados['Close'].squeeze()
+            
             # Cálculo de Indicadores
-            dados['Retorno'] = dados['Close'].pct_change()
-            dados['MA_20'] = dados['Close'].rolling(window=20).mean()
-            dados['MA_50'] = dados['Close'].rolling(window=50).mean()
-            dados['Alvo'] = np.where(dados['Close'].shift(-5) > dados['Close'], 1, 0)
+            dados['Retorno'] = close_series.pct_change()
+            dados['MA_20'] = close_series.rolling(window=20).mean()
+            dados['MA_50'] = close_series.rolling(window=50).mean()
+            dados['Alvo'] = np.where(close_series.shift(-5) > close_series, 1, 0)
             
             # Gráfico de Preços e Médias Móveis
             fig_preco = go.Figure()
-            fig_preco.add_trace(go.Scatter(x=dados.index, y=dados['Close'].values.flatten(), mode='lines', name='Preço de Fechamento'))
-            fig_preco.add_trace(go.Scatter(x=dados.index, y=dados['MA_20'].values.flatten(), mode='lines', name='Média Móvel 20 dias', line=dict(dash='dash')))
-            fig_preco.add_trace(go.Scatter(x=dados.index, y=dados['MA_50'].values.flatten(), mode='lines', name='Média Móvel 50 dias', line=dict(dash='dot')))
+            fig_preco.add_trace(go.Scatter(x=dados.index, y=close_series, mode='lines', name='Preço de Fechamento'))
+            fig_preco.add_trace(go.Scatter(x=dados.index, y=dados['MA_20'].squeeze(), mode='lines', name='Média Móvel 20 dias', line=dict(dash='dash')))
+            fig_preco.add_trace(go.Scatter(x=dados.index, y=dados['MA_50'].squeeze(), mode='lines', name='Média Móvel 50 dias', line=dict(dash='dot')))
             
             fig_preco.update_layout(
                 title=f"Histórico de Preços e Tendências ({ticker_input_formatted})",
@@ -95,9 +85,10 @@ with aba1:
             
             col1, col2 = st.columns(2)
             with col1:
+                ultimo_preco = float(close_series.iloc[-1])
                 st.metric(
                     label="Último Fechamento Cotado", 
-                    value=f"R$ {dados['Close'].iloc[-1].item():.2f}"
+                    value=f"R$ {ultimo_preco:.2f}"
                 )
             with col2:
                 tendencia_texto = "ALTA 🚀" if predicao == 1 else "QUEDA / NEUTRO 📉"
@@ -121,7 +112,7 @@ with aba2:
     with col_sim1:
         taxa_anual = st.number_input("Taxa de Juros Anual Esperada (%):", min_value=1.0, max_value=30.0, value=10.0, step=0.5)
     with col_sim2:
-        patrimonio_inicial = st.number_input("Aporte Inicial (R$):", min_value=0, max_value=1000000, value=1000, step=500)
+        patrimonio_inicial = st.number_number_input("Aporte Inicial (R$):", min_value=0, max_value=1000000, value=1000, step=500)
         
     taxa_mensal = (1 + (taxa_anual / 100)) ** (1/12) - 1
     
