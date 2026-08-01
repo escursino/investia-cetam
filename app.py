@@ -36,30 +36,33 @@ aba1, aba2, aba3 = st.tabs(["📊 Análise do Ativo & IA", "💰 Simulação Pat
 # ----------------------------------------------------
 with aba1:
     st.subheader(f"Análise Técnica e Diagnóstico de IA: {ticker_input_formatted}")
-    
+
     try:
         with st.spinner("Buscando dados históricos do ativo..."):
-            # multi_level_index=False evita colunas com MultiIndex
-            dados = yf.download(ticker_input_formatted, period="2y", progress=False, multi_level_index=False)
-            
+            dados = yf.download(ticker_input_formatted, period="2y", progress=False)
+
         if dados.empty:
             st.error(f"Não foram encontrados dados para o código '{ticker_input_formatted}'. Verifique a digitação.")
         else:
-            # Garante que estamos trabalhando com Series (não DataFrame de 1 coluna)
-            close_series = dados['Close'].squeeze()
-            
+            # Trata MultiIndex do yfinance (versões recentes retornam colunas duplas)
+            if isinstance(dados.columns, pd.MultiIndex):
+                dados.columns = dados.columns.get_level_values(0)
+
+            # Garante que Close é uma Series
+            close_series = dados['Close'].squeeze() if hasattr(dados['Close'], 'squeeze') else dados['Close']
+
             # Cálculo de Indicadores
             dados['Retorno'] = close_series.pct_change()
             dados['MA_20'] = close_series.rolling(window=20).mean()
             dados['MA_50'] = close_series.rolling(window=50).mean()
             dados['Alvo'] = np.where(close_series.shift(-5) > close_series, 1, 0)
-            
+
             # Gráfico de Preços e Médias Móveis
             fig_preco = go.Figure()
             fig_preco.add_trace(go.Scatter(x=dados.index, y=close_series, mode='lines', name='Preço de Fechamento'))
             fig_preco.add_trace(go.Scatter(x=dados.index, y=dados['MA_20'].squeeze(), mode='lines', name='Média Móvel 20 dias', line=dict(dash='dash')))
             fig_preco.add_trace(go.Scatter(x=dados.index, y=dados['MA_50'].squeeze(), mode='lines', name='Média Móvel 50 dias', line=dict(dash='dot')))
-            
+
             fig_preco.update_layout(
                 title=f"Histórico de Preços e Tendências ({ticker_input_formatted})",
                 xaxis_title="Data",
@@ -67,37 +70,40 @@ with aba1:
                 template="plotly_white"
             )
             st.plotly_chart(fig_preco, use_container_width=True)
-            
+
             # Modelo de IA (Random Forest Classifier)
             dados_clean = dados.dropna()
             features = ['Retorno', 'MA_20', 'MA_50']
-            
-            X = dados_clean[features]
-            y = dados_clean['Alvo']
-            
-            model = RandomForestClassifier(n_estimators=100, random_state=42)
-            model.fit(X, y)
-            
-            # Predição para os próximos dias
-            ultima_linha = X.iloc[[-1]]
-            predicao = model.predict(ultima_linha)[0]
-            probabilidade = model.predict_proba(ultima_linha)[0]
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                ultimo_preco = float(close_series.iloc[-1])
-                st.metric(
-                    label="Último Fechamento Cotado", 
-                    value=f"R$ {ultimo_preco:.2f}"
-                )
-            with col2:
-                tendencia_texto = "ALTA 🚀" if predicao == 1 else "QUEDA / NEUTRO 📉"
-                confianca = probabilidade[1] if predicao == 1 else probabilidade[0]
-                st.metric(
-                    label="Tendência Prevista pela IA (Curto Prazo)", 
-                    value=tendencia_texto,
-                    delta=f"Confiança do Modelo: {confianca * 100:.1f}%"
-                )
+
+            if len(dados_clean) < 10:
+                st.warning("Dados insuficientes para treinar o modelo de IA.")
+            else:
+                X = dados_clean[features]
+                y = dados_clean['Alvo']
+
+                model = RandomForestClassifier(n_estimators=100, random_state=42)
+                model.fit(X, y)
+
+                # Predição para os próximos dias
+                ultima_linha = X.iloc[[-1]]
+                predicao = model.predict(ultima_linha)[0]
+                probabilidade = model.predict_proba(ultima_linha)[0]
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    ultimo_preco = float(close_series.iloc[-1])
+                    st.metric(
+                        label="Último Fechamento Cotado", 
+                        value=f"R$ {ultimo_preco:.2f}"
+                    )
+                with col2:
+                    tendencia_texto = "ALTA 🚀" if predicao == 1 else "QUEDA / NEUTRO 📉"
+                    confianca = probabilidade[1] if predicao == 1 else probabilidade[0]
+                    st.metric(
+                        label="Tendência Prevista pela IA (Curto Prazo)", 
+                        value=tendencia_texto,
+                        delta=f"Confiança do Modelo: {confianca * 100:.1f}%"
+                    )
 
     except Exception as e:
         st.error(f"Erro ao processar os dados do ativo: {str(e)}")
@@ -107,38 +113,38 @@ with aba1:
 # ----------------------------------------------------
 with aba2:
     st.subheader("Simulador de Acumulação Patrimonial")
-    
+
     col_sim1, col_sim2 = st.columns(2)
     with col_sim1:
         taxa_anual = st.number_input("Taxa de Juros Anual Esperada (%):", min_value=1.0, max_value=30.0, value=10.0, step=0.5)
     with col_sim2:
-        patrimonio_inicial = st.number_number_input("Aporte Inicial (R$):", min_value=0, max_value=1000000, value=1000, step=500)
-        
+        patrimonio_inicial = st.number_input("Aporte Inicial (R$):", min_value=0, max_value=1000000, value=1000, step=500)
+
     taxa_mensal = (1 + (taxa_anual / 100)) ** (1/12) - 1
-    
+
     meses = np.arange(1, prazo_meses + 1)
     patrimonio = []
     total_investido = []
-    
+
     saldo = patrimonio_inicial
     investido = patrimonio_inicial
-    
+
     for m in meses:
         saldo = saldo * (1 + taxa_mensal) + aporte_mensal
         investido += aporte_mensal
         patrimonio.append(saldo)
         total_investido.append(investido)
-        
+
     df_simulacao = pd.DataFrame({
         'Mês': meses,
         'Patrimônio Total': patrimonio,
         'Total Investido': total_investido
     })
-    
+
     fig_sim = go.Figure()
     fig_sim.add_trace(go.Scatter(x=df_simulacao['Mês'], y=df_simulacao['Patrimônio Total'], mode='lines', name='Patrimônio Bruto', fill='tozeroy'))
     fig_sim.add_trace(go.Scatter(x=df_simulacao['Mês'], y=df_simulacao['Total Investido'], mode='lines', name='Total Aplicado do Bolso', line=dict(dash='dash')))
-    
+
     fig_sim.update_layout(
         title=f"Projeção em {prazo_meses} Meses (Rendimentos vs Aportes)",
         xaxis_title="Período (Meses)",
@@ -146,7 +152,7 @@ with aba2:
         template="plotly_white"
     )
     st.plotly_chart(fig_sim, use_container_width=True)
-    
+
     res1, res2 = st.columns(2)
     res1.success(f"**Valor Total Acumulado:** R$ {patrimonio[-1]:,.2f}")
     res2.info(f"**Total do Próprio Bolso:** R$ {total_investido[-1]:,.2f}")
@@ -158,7 +164,7 @@ with aba3:
     st.subheader("Sobre a Plataforma InvestIA")
     st.markdown("""
     Esta aplicação foi desenvolvida como parte de projeto técnico focado em **Inteligência Artificial aplicada ao Mercado Financeiro e Análise de Dados**.
-    
+
     **Funcionalidades:**
     - Coleta automatizada de cotações da B3 via integração de dados.
     - Classificação de tendência com **Random Forest (Machine Learning)**.
